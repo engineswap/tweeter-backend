@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { authenticateJWT } = require('../api.js');
 
-router.get('/', authenticateJWT, (req, res) => {
+router.get('/', authenticateJWT, async (req, res) => {
     console.log(`${req.method} ${req.originalUrl}`);
 
     const { type, page = 1, query } = req.query;
@@ -10,43 +10,45 @@ router.get('/', authenticateJWT, (req, res) => {
 
     if (!validTypes.includes(type)) {
         return res.status(400).send("Type invalid");
-    } else if (!query || query == "") {
-        return res.json([]).status(200);
+    } else if (!query || query.trim() === "") {
+        return res.status(200).json([]);
     }
 
-    const searchUsersQuery = req.db.prepare(`
+    const searchUsersQuery = `
         SELECT id, username, profile_picture_url, biography
         FROM users 
-        WHERE username LIKE ? 
-        LIMIT 10 OFFSET ?
-    `);
+        WHERE username ILIKE $1 
+        LIMIT 10 OFFSET $2
+    `;
 
-    const searchTweetsQuery = req.db.prepare(`
+    const searchTweetsQuery = `
         SELECT tweets.*, 
-            users.username, 
-            users.profile_picture_url,
-            CASE WHEN likes.liker IS NOT NULL THEN 1 ELSE 0 END AS liked
+               users.username, 
+               users.profile_picture_url,
+               CASE WHEN likes.liker IS NOT NULL THEN 1 ELSE 0 END AS liked
         FROM tweets 
-        LEFT JOIN users ON users.id=tweets.author_id
-        LEFT JOIN likes
-            ON likes.tweet_id=tweets.id AND likes.liker = ?
-        WHERE tweets.content LIKE ? 
-        LIMIT 10 OFFSET ?
-    `);
+        LEFT JOIN users ON users.id = tweets.author_id
+        LEFT JOIN likes ON likes.tweet_id = tweets.id AND likes.liker = $1
+        WHERE tweets.content ILIKE $2 
+        LIMIT 10 OFFSET $3
+    `;
 
     try {
         let results;
-        if (type == "users") {
-            results = searchUsersQuery.all(`%${query}%`, (page - 1) * 10);
-        } else if (type == 'tweets') {
-            results = searchTweetsQuery.all(req.user.id,`%${query}%`, (page - 1) * 10);
+        const offset = (page - 1) * 10;
+
+        if (type === "users") {
+            results = await req.db.query(searchUsersQuery, [`%${query}%`, offset]);
+        } else if (type === "tweets") {
+            results = await req.db.query(searchTweetsQuery, [req.user.id, `%${query}%`, offset]);
         }
-        console.log(results)
-        return res.json(results).status(200);
+
+        console.log(results.rows);
+        return res.status(200).json(results.rows);
     } catch (e) {
         const errStr = `Error with SQL query: ${e.message}`;
         console.error(errStr);
-        return res.send(errStr).status(500);
+        return res.status(500).send(errStr);
     }
 });
 

@@ -10,33 +10,32 @@ AWS.config.update({
 const s3 = new AWS.S3();
 const { authenticateJWT } = require('../api.js');
 
-router.post('/:followedId/follow', authenticateJWT, (req, res) => {
+router.post('/:followedId/follow', authenticateJWT, async (req, res) => {
     console.log(`${req.method} ${req.originalUrl}`);
     const { followedId } = req.params;
     const followerId = req.user.id;
 
     if (followedId == followerId) {
-        return res.status(401).send("You cant follow yourself.");
+        return res.status(401).send("You can't follow yourself.");
     }
-
-    // Check if relationship already exists
-    const checkExists = req.db.prepare(`
-        SELECT 1 FROM follows WHERE follower = ? AND followed = ? LIMIT 1;
-    `);
-    const exists = checkExists.get(followerId, followedId);
-
-    if (exists) {
-        console.log("Exists already")
-        return res.sendStatus(200);
-    }
-
-    const addFollower = req.db.prepare(`
-        INSERT INTO follows (follower, followed)
-        VALUES (?,?)
-    `);
 
     try {
-        const info = addFollower.run(followerId, followedId);
+        // Check if relationship already exists
+        const exists = await req.db.query(`
+            SELECT 1 FROM follows WHERE follower = $1 AND followed = $2 LIMIT 1;
+        `, [followerId, followedId]);
+
+        if (exists.rows.length > 0) {
+            console.log("Exists already");
+            return res.sendStatus(200);
+        }
+
+        // Add follower
+        await req.db.query(`
+            INSERT INTO follows (follower, followed)
+            VALUES ($1, $2)
+        `, [followerId, followedId]);
+
         console.log(`${followerId} followed ${followedId}`);
         return res.sendStatus(200);
     } catch (error) {
@@ -44,33 +43,31 @@ router.post('/:followedId/follow', authenticateJWT, (req, res) => {
     }
 });
 
-// TODO: Add a limit to delete when not using sqlite3
-router.delete('/:followedId/follow', authenticateJWT, (req, res) => {
+router.delete('/:followedId/follow', authenticateJWT, async (req, res) => {
     console.log(`${req.method} ${req.originalUrl}`);
     const { followedId } = req.params;
     const followerId = req.user.id;
 
     if (followedId == followerId) {
-        return res.status(401).send("You cant unfollow yourself.");
+        return res.status(401).send("You can't unfollow yourself.");
     }
-
-    // Check if relationship already exists
-    const checkExists = req.db.prepare(`
-        SELECT 1 FROM follows WHERE follower = ? AND followed = ? LIMIT 1;
-    `);
-    const exists = checkExists.get(followerId, followedId);
-
-    if (!exists) {
-        console.log("Already not following")
-        return res.sendStatus(200);
-    }
-
-    const removeFollower = req.db.prepare(`
-        DELETE FROM follows WHERE follower=? AND followed=?;
-    `);
 
     try {
-        const info = removeFollower.run(followerId, followedId);
+        // Check if relationship exists
+        const exists = await req.db.query(`
+            SELECT 1 FROM follows WHERE follower = $1 AND followed = $2 LIMIT 1;
+        `, [followerId, followedId]);
+
+        if (exists.rows.length === 0) {
+            console.log("Already not following");
+            return res.sendStatus(200);
+        }
+
+        // Remove follower
+        await req.db.query(`
+            DELETE FROM follows WHERE follower = $1 AND followed = $2;
+        `, [followerId, followedId]);
+
         console.log(`${followerId} unfollowed ${followedId}`);
         return res.sendStatus(200);
     } catch (error) {
@@ -78,47 +75,61 @@ router.delete('/:followedId/follow', authenticateJWT, (req, res) => {
     }
 });
 
-router.get('/:username', authenticateJWT, (req, res) => {
+router.get('/:username', authenticateJWT, async (req, res) => {
     console.log(`${req.method} ${req.originalUrl}`);
     const { username } = req.params;
+
     try {
         // Basic info
-        const info = req.db.prepare(
-            `SELECT id, username, biography, created_at, profile_picture_url 
+        const info = await req.db.query(`
+            SELECT id, username, biography, created_at, profile_picture_url 
             FROM users
-            WHERE username=?
-        `).get(username);
-        console.log(info);
-        // Follower count
-        const followers = req.db.prepare(`SELECT COUNT(*) FROM follows WHERE followed=?`).all(info.id);
-        const following = req.db.prepare(`SELECT COUNT(*) FROM follows WHERE follower=?`).all(info.id);
+            WHERE username = $1
+        `, [username]);
 
-        // Does user follow username?
-        const isFollowingRes = req.db.prepare(`SELECT * FROM follows WHERE followed=? AND follower=?`).get(info.id, req.user.id);
-        info.JWTUserId = req.user.id;
-        info.JWTUserFollows = (isFollowingRes) ? true : false
-
-        info.following = following[0][`COUNT(*)`];
-        info.followers = followers[0][`COUNT(*)`];
-        if (!info) {
+        if (info.rows.length === 0) {
             return res.sendStatus(404);
         }
-        return res.status(200).json(info);
+
+        const userInfo = info.rows[0];
+
+        // Follower count
+        const followers = await req.db.query(`
+            SELECT COUNT(*) FROM follows WHERE followed = $1
+        `, [userInfo.id]);
+
+        const following = await req.db.query(`
+            SELECT COUNT(*) FROM follows WHERE follower = $1
+        `, [userInfo.id]);
+
+        // Does user follow username?
+        const isFollowingRes = await req.db.query(`
+            SELECT * FROM follows WHERE followed = $1 AND follower = $2
+        `, [userInfo.id, req.user.id]);
+
+        userInfo.JWTUserId = req.user.id;
+        userInfo.JWTUserFollows = isFollowingRes.rows.length > 0;
+
+        userInfo.following = following.rows[0].count;
+        userInfo.followers = followers.rows[0].count;
+
+        return res.status(200).json(userInfo);
     } catch (error) {
         return res.status(500).send(error.message);
     }
 });
 
-router.post('/updateBiography', authenticateJWT, (req, res) => {
+router.post('/updateBiography', authenticateJWT, async (req, res) => {
     console.log(`${req.method} ${req.originalUrl}`);
 
     const { biography } = req.body;
 
     try {
-        const updateBioRes = req.db.prepare(`
-            UPDATE users SET biography = ? WHERE id = ? 
-        `).run(biography, req.user.id);
-        return res.sendStatus(200)
+        await req.db.query(`
+            UPDATE users SET biography = $1 WHERE id = $2
+        `, [biography, req.user.id]);
+
+        return res.sendStatus(200);
     } catch (e) {
         return res.status(500).send(e.message);
     }
@@ -127,10 +138,9 @@ router.post('/updateBiography', authenticateJWT, (req, res) => {
 const uploadToS3 = async (fileData, bucketName, key, mimeType) => {
     const params = {
         Bucket: bucketName,
-        Key: key, // The file name in S3
+        Key: key,
         Body: Buffer.from(fileData, 'base64'),
         ContentType: mimeType
-        // ACL: 'public-read' // Allow public access (if needed)
     };
 
     try {
@@ -143,7 +153,6 @@ const uploadToS3 = async (fileData, bucketName, key, mimeType) => {
     }
 };
 
-// If an old one exists we must overwrite it - s3 does this by default
 router.post('/updateProfilePicture', authenticateJWT, async (req, res) => {
     console.log(`${req.method} ${req.originalUrl}`);
 
@@ -153,35 +162,31 @@ router.post('/updateProfilePicture', authenticateJWT, async (req, res) => {
             console.error('Invalid data type');
             return res.status(400).send('Invalid file data');
         }
-        // Ensure file type is correct
+
         const allowedFileTypes = ['image/jpeg', 'image/png'];
         if (!allowedFileTypes.includes(fileType)) {
             console.error("Invalid file type: " + fileType);
             return res.status(400).send("Only JPEG and PNG files allowed");
         }
 
-        const fileExtension = fileType == 'image/jpeg' ? '.jpg' : '.png';
+        const fileExtension = fileType === 'image/jpeg' ? '.jpg' : '.png';
         const s3Key = `profile-pictures/${req.user.username}${fileExtension}`;
 
         const s3Path = await uploadToS3(fileData, "twittercloneresources", s3Key);
-        console.log(s3Path);
         if (s3Path) {
-            // Update the path in db
-            const dbUpdateRes = req.db.prepare(`
-                UPDATE users SET profile_picture_url = ? WHERE id = ?
-            `).run(s3Path, req.user.id);
+            await req.db.query(`
+                UPDATE users SET profile_picture_url = $1 WHERE id = $2
+            `, [s3Path, req.user.id]);
 
             return res.sendStatus(200);
         } else {
-            return res.status(500).send("Error occured uploading your profile to AWS s3");
+            return res.status(500).send("Error occurred uploading your profile to AWS S3");
         }
     } catch (e) {
-        const errStr = `Error changing profile picture ${e.message}`
+        const errStr = `Error changing profile picture: ${e.message}`;
         console.error(errStr);
         return res.status(500).send(errStr);
     }
 });
-
-
 
 module.exports = router;

@@ -14,19 +14,18 @@ router.post('/register', async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Save user to db
-    const addUser = req.db.prepare(`
+    const addUser = `
         INSERT INTO users (email, username, password)
-        VALUES (?,?,?)
-    `); // ?,?,? -> Parameterized query to combat SQL injection
+        VALUES ($1,$2,$3)
+    `;
 
     try {
-        const info = addUser.run(email, username, hashedPassword);
+        const info = await req.db.query(addUser, [email, username, hashedPassword]);
         return res.sendStatus(200);
     } catch (error) {
         console.log(error.message)
         res.status(500).send(error.message);
     }
-    // TODO: Create JWT here and send it back
 })
 
 router.post('/login', async (req, res) => {
@@ -34,17 +33,18 @@ router.post('/login', async (req, res) => {
     const { username, password } = req.body;
 
     // Try to find user
-    const getUser = req.db.prepare(`SELECT * FROM users WHERE username = ? LIMIT 1;`);
-    const user = getUser.get(username);
-    if (!user) {
+    const userRes = await req.db.query('SELECT * FROM users WHERE username = $1 LIMIT 1;', [username]) 
+    if (!userRes.rows.length>0) {
         return res.status(500).send("User not found!");
     }
+    const user = userRes.rows[0];
 
     // Check passwords match
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
         return res.status(401).send("Incorrect password!");
     }
+
     let token;
     try {
         token = jwt.sign(
