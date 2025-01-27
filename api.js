@@ -10,11 +10,10 @@ require('dotenv').config();
 
 // Configure your PostgreSQL connection
 const db = new Client({
-    user: process.env.DB_USER,
-    host: process.env.DB_HOST,
-    database: process.env.DB_DATABASE,
-    password: process.env.DB_PASSWORD,
-    port: process.env.DB_PORT
+    connectionString: process.env.DB_CONNECTION_STRING,
+    ssl: {
+        rejectUnauthorized: false // Required for Render's PostgreSQL
+    }
 });
 
 // Create tables if they dont exist
@@ -42,12 +41,12 @@ redisClient.on('error', (err) => {
 });
 
 async function connectToRedis() {
-  try {
-    await redisClient.connect();
-    console.log('Connected to Redis');
-  } catch (err) {
-    console.error('Failed to connect to Redis:', err);
-  }
+    try {
+        await redisClient.connect();
+        console.log('Connected to Redis');
+    } catch (err) {
+        console.error('Failed to connect to Redis:', err);
+    }
 }
 
 connectToRedis();

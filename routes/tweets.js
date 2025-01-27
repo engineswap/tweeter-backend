@@ -4,24 +4,19 @@ const { authenticateJWT } = require('../api.js');
 
 router.post('/', authenticateJWT, async (req, res) => {
     console.log(`${req.method} ${req.originalUrl}`);
-    let { content, isReply, parentTweetId } = req.body;
+    let { content, } = req.body;
     const userId = req.user.id;
 
-    if (parentTweetId == undefined) parentTweetId = null;
-    if (isReply == undefined) isReply = null;
-    isReply = isReply ? 1 : 0
-
     const addTweet = `
-        INSERT INTO tweets (content, author_id, is_reply, parent_tweet_id)
-        VALUES ($1,$2,$3,$4)
+        INSERT INTO tweets (content, author_id)
+        VALUES ($1,$2)
     `;
 
     try {
         const info = await req.db.query(addTweet,
             [content,
                 userId,
-                isReply,
-                parentTweetId]);
+                ]);
         console.log("Added tweet to db.");
         return res.sendStatus(200);
     } catch (error) {

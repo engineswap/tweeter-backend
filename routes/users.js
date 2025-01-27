@@ -143,10 +143,11 @@ router.post('/updateBiography', authenticateJWT, async (req, res) => {
         `, [biography, req.user.id]);
 
         // Invalidate the cached user metadata
-        await req.cache.del(`user:info:${username}`)
+        await req.cache.del(`user:info:${req.user.username}`)
 
         return res.sendStatus(200);
     } catch (e) {
+        console.log(e)
         return res.status(500).send(e.message);
     }
 });
@@ -195,13 +196,14 @@ router.post('/updateProfilePicture', authenticateJWT, async (req, res) => {
             `, [s3Path, req.user.id]);
 
             // Invalidate the cached user metadata
-            await req.cache.del(`user:info:${username}`)
+            await req.cache.del(`user:info:${req.user.username}`)
 
             return res.sendStatus(200);
         } else {
             return res.status(500).send("Error occurred uploading your profile to AWS S3");
         }
     } catch (e) {
+        console.log(e);
         const errStr = `Error changing profile picture: ${e.message}`;
         console.error(errStr);
         return res.status(500).send(errStr);
