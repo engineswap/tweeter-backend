@@ -76,8 +76,7 @@ function authenticateJWT(req, res, next) {
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = decoded; // Save id and username to req
-        next();
-    } catch (error) {
+        next(); } catch (error) {
         console.error(`Token verification failed: ${error.message}`)
         return res.status(403).send("Invalid or expired token.");
     }
@@ -85,7 +84,7 @@ function authenticateJWT(req, res, next) {
 module.exports = { authenticateJWT };
 
 // Allow requests from localhost:3000
-app.use(cors({ origin: 'http://localhost:3000' }));
+app.use(cors({ origin: 'https://tweeter-frontend.onrender.com' }));
 
 //import routes
 const authRoutes = require('./routes/auth.js');
