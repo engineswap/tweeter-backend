@@ -80,18 +80,31 @@ router.get('/:username', authenticateJWT, async (req, res) => {
     const { username } = req.params;
 
     try {
-        // Basic info
-        const info = await req.db.query(`
-            SELECT id, username, biography, created_at, profile_picture_url 
-            FROM users
-            WHERE username = $1
-        `, [username]);
+        // Grab basic user metadata
+        const cacheKey = `user:info:${username}`;
+        const cacheValue = await req.cache.get(cacheKey);
+        let userInfo;
 
-        if (info.rows.length === 0) {
-            return res.sendStatus(404);
+        if (cacheValue) {
+            console.log("Successful cache access")
+            userInfo = JSON.parse(cacheValue);
+        } else {
+            console.log("Querying DB")
+            const info = await req.db.query(`
+                SELECT id, username, biography, created_at, profile_picture_url 
+                FROM users
+                WHERE username = $1
+            `, [username]);
+
+            if (info.rows.length === 0) {
+                return res.sendStatus(404);
+            }
+
+            userInfo = info.rows[0];
+
+            // Update cache 
+            await req.cache.setEx(cacheKey, 600, JSON.stringify(userInfo));
         }
-
-        const userInfo = info.rows[0];
 
         // Follower count
         const followers = await req.db.query(`
@@ -128,6 +141,9 @@ router.post('/updateBiography', authenticateJWT, async (req, res) => {
         await req.db.query(`
             UPDATE users SET biography = $1 WHERE id = $2
         `, [biography, req.user.id]);
+
+        // Invalidate the cached user metadata
+        await req.cache.del(`user:info:${username}`)
 
         return res.sendStatus(200);
     } catch (e) {
@@ -177,6 +193,9 @@ router.post('/updateProfilePicture', authenticateJWT, async (req, res) => {
             await req.db.query(`
                 UPDATE users SET profile_picture_url = $1 WHERE id = $2
             `, [s3Path, req.user.id]);
+
+            // Invalidate the cached user metadata
+            await req.cache.del(`user:info:${username}`)
 
             return res.sendStatus(200);
         } else {

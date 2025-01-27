@@ -43,7 +43,6 @@ router.get('/', authenticateJWT, async (req, res) => {
             results = await req.db.query(searchTweetsQuery, [req.user.id, `%${query}%`, offset]);
         }
 
-        console.log(results.rows);
         return res.status(200).json(results.rows);
     } catch (e) {
         const errStr = `Error with SQL query: ${e.message}`;

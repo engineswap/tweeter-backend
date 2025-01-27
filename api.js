@@ -1,6 +1,7 @@
-// const db = require('better-sqlite3')('./database.db');
 const { Client } = require('pg');
+const listEndpoints = require('express-list-endpoints');
 const jwt = require('jsonwebtoken');
+const redis = require('redis');
 const fs = require('fs');
 const express = require('express');
 const app = express();
@@ -9,13 +10,12 @@ require('dotenv').config();
 
 // Configure your PostgreSQL connection
 const db = new Client({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_DATABASE,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT
+    user: process.env.DB_USER,
+    host: process.env.DB_HOST,
+    database: process.env.DB_DATABASE,
+    password: process.env.DB_PASSWORD,
+    port: process.env.DB_PORT
 });
-
 
 // Create tables if they dont exist
 const createUsersTable = fs.readFileSync('./schemas/users.sql', 'utf8');
@@ -32,14 +32,35 @@ async function createTables() {
 }
 createTables();
 
+// Connect to redis 
+const redisClient = redis.createClient({
+    url: process.env.REDIS_URL || 'redis://localhost:6379', // Use environment variable or default URL
+});
+
+redisClient.on('error', (err) => {
+    console.error('Redis Client Error:', err);
+});
+
+async function connectToRedis() {
+  try {
+    await redisClient.connect();
+    console.log('Connected to Redis');
+  } catch (err) {
+    console.error('Failed to connect to Redis:', err);
+  }
+}
+
+connectToRedis();
+
 //Middleware to increase payload size limit
 app.use(express.json({ limit: '5mb', extended: true }));
 app.use(express.urlencoded({ limit: '5mb', extended: true, }));
 app.use(express.text({ limit: '5mb' }));
 
-// Middleware to inject DB
+// Middleware to inject DB & cache 
 app.use((req, res, next) => {
     req.db = db;
+    req.cache = redisClient;
     next();
 });
 
@@ -77,6 +98,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tweets', tweetRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/search', searchRoutes);
+
+fs.writeFileSync('./routes.json', JSON.stringify(listEndpoints(app)));
 
 app.listen(process.env.PORT, () => {
     console.log(`API listening on port ${process.env.PORT}`)
